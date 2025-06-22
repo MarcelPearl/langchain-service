@@ -4,7 +4,7 @@ import json
 
 BOOTSTRAP_SERVERS = settings.kafka.bootstrap_servers
 
-# Producer Setup
+
 async def get_kafka_producer():
     producer = AIOKafkaProducer(
         bootstrap_servers=BOOTSTRAP_SERVERS,
@@ -16,7 +16,8 @@ async def get_kafka_producer():
     await producer.start()
     return producer
 
-# Node Execution Consumer
+
+
 async def get_node_execution_consumer():
     consumer = AIOKafkaConsumer(
         "fastapi-nodes",

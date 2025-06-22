@@ -19,7 +19,8 @@ class SummarizationHandler(BaseNodeHandler):
         logger.info("📥 Loading OpenAI summarization handler...")
         
         try:
-            # Get API key
+
+
             api_key = getattr(settings, 'openai_api_key', None) or os.getenv('OPENAI_API_KEY')
             
             if not api_key:
@@ -27,9 +28,10 @@ class SummarizationHandler(BaseNodeHandler):
             
             self.client = openai.OpenAI(api_key=api_key)
             
-            # Simple settings
-            self.default_model = "gpt-3.5-turbo"  # Cheapest option
-            self.max_summary_tokens = 200         # Hard limit for summary length
+
+
+            self.default_model = "gpt-3.5-turbo"  
+            self.max_summary_tokens = 200        
             
             logger.info(f"✅ OpenAI summarization ready - Max summary tokens: {self.max_summary_tokens}")
             
@@ -49,13 +51,16 @@ class SummarizationHandler(BaseNodeHandler):
             node_data = message.nodeData
             context = message.context or {}
 
-            # Get text to summarize
+
+
             text = self.substitute_template_variables(node_data.get("text", ""), context)
             
             if not text.strip():
                 raise ValueError("No text provided for summarization")
 
-            # Get parameters with limits
+    
+
+
             requested_length = node_data.get("max_length", 130)
             max_summary_tokens = min(requested_length, self.max_summary_tokens)
             
@@ -67,10 +72,13 @@ class SummarizationHandler(BaseNodeHandler):
 
             logger.info(f"📄 Summarizing {len(text)} chars with {model}")
 
-            # Generate summary
+  
+
             summary = await self._generate_summary(text, max_summary_tokens, min_length, model)
 
-            # Build response
+   
+
+
             output = {
                 **context,
                 "summary": summary,
@@ -112,7 +120,7 @@ class SummarizationHandler(BaseNodeHandler):
         
         def _call_openai():
             try:
-                # Create a good summarization prompt
+             
                 prompt = f"""Please summarize the following text in {min_length}-{max_tokens} words. Make it concise and capture the key points:
 
 Text to summarize:
@@ -120,17 +128,18 @@ Text to summarize:
 
 Summary:"""
 
+
                 response = self.client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=max_tokens,
-                    temperature=0.3,  # Lower temperature for more focused summaries
+                    temperature=0.3, 
                     timeout=30
                 )
                 
                 summary = response.choices[0].message.content.strip()
                 
-                # Clean up the summary (remove "Summary:" prefix if it exists)
+            
                 if summary.lower().startswith("summary:"):
                     summary = summary[8:].strip()
                 
@@ -143,7 +152,8 @@ Summary:"""
             except Exception as e:
                 raise RuntimeError(f"OpenAI error: {e}")
 
-        # Run async
+
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _call_openai)
 
@@ -171,6 +181,7 @@ Summary:"""
                 
         except Exception as e:
             logger.error(f"❌ Failed to publish event: {e}")
+
 
     def update_token_limit(self, new_limit: int):
         """Update the summary token limit"""

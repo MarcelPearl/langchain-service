@@ -23,7 +23,7 @@ class BaseNodeHandler(ABC):
         if not template or not context:
             return template
         
-        # Exact pattern from Spring Boot TemplateUtils
+     
         pattern = re.compile(r'\{\{([^}]+)\}\}')
         
         def replace_var(match):

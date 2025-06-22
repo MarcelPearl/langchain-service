@@ -1,9 +1,8 @@
 import json
 import logging
 import asyncio
-from typing import Callable, Dict, Any
+from typing import Callable
 from kafka import KafkaConsumer, KafkaProducer
-from kafka.errors import KafkaError
 from app.core.config import settings
 from app.models.workflow_message import NodeExecutionMessage, NodeCompletionMessage
 
@@ -19,37 +18,46 @@ class KafkaService:
     
     def _create_consumer(self):
         """Create Kafka consumer with exact Spring Boot configuration"""
+
+        # Same as spring booot
         return KafkaConsumer(
             settings.kafka_node_execution_topic,
             bootstrap_servers=settings.kafka_bootstrap_servers,
             group_id=settings.kafka_group_id,
             auto_offset_reset=settings.kafka_auto_offset_reset,
             enable_auto_commit=True,
-            auto_commit_interval_ms=5000,  # Match Spring Boot
-            session_timeout_ms=30000,     # Match Spring Boot
-            heartbeat_interval_ms=3000,   # Match Spring Boot
-            max_poll_records=500,         # Match Spring Boot
+            auto_commit_interval_ms=5000, 
+            session_timeout_ms=30000,    
+            heartbeat_interval_ms=3000,   
+            max_poll_records=500,         
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
             key_deserializer=lambda x: x.decode('utf-8') if x else None,
             consumer_timeout_ms=1000
         )
     
+
+
     def _create_producer(self):
         """Create Kafka producer with exact Spring Boot configuration"""
         return KafkaProducer(
             bootstrap_servers=settings.kafka_bootstrap_servers,
             value_serializer=lambda x: json.dumps(x, default=str).encode('utf-8'),
             key_serializer=lambda x: x.encode('utf-8') if x else None,
-            acks=1,      # Match Spring Boot
-            retries=3,   # Match Spring Boot
-            batch_size=16384,      # Match Spring Boot
-            linger_ms=5,          # Match Spring Boot
-            buffer_memory=33554432 # Match Spring Boot
+            acks=1,      
+            retries=3,  
+            batch_size=16384,     
+            linger_ms=5,       
+            buffer_memory=33554432 
         )
+    
+
     
     def _normalize_message_fields(self, message_data: dict) -> dict:
         """Convert Java camelCase to Python snake_case and handle field mappings"""
-        # Create a mapping of possible field variations
+        
+
+
+
         field_mappings = {
             'executionId': 'execution_id',
             'execution_id': 'execution_id',
@@ -76,6 +84,10 @@ class KafkaService:
             
         return normalized
     
+
+
+
+
     async def start_consumer(self, node_executor_callback: Callable):
         """Start consuming messages from Kafka"""
         self.running = True
@@ -90,7 +102,6 @@ class KafkaService:
             
             while self.running:
                 try:
-                    # Poll for messages with timeout
                     message_batch = self.consumer.poll(timeout_ms=1000)
                     
                     for topic_partition, messages in message_batch.items():
@@ -98,10 +109,8 @@ class KafkaService:
                             try:
                                 logger.info(f"📨 Raw message received from {topic_partition}: {message.value}")
                                 
-                                # Normalize field names
                                 normalized_data = self._normalize_message_fields(message.value)
                                 
-                                # Parse the message using the exact Spring Boot format
                                 execution_message = NodeExecutionMessage.model_validate(normalized_data)
                                 
                                 logger.info(
@@ -110,21 +119,18 @@ class KafkaService:
                                     f"for execution: {execution_message.executionId}"
                                 )
                                 
-                                # Execute the node asynchronously
                                 await node_executor_callback(execution_message)
                                 
                             except Exception as e:
                                 logger.error(f"❌ Error processing message: {e}")
                                 logger.error(f"❌ Message content: {message.value}")
-                                # Send failure message
                                 await self._send_failure_completion(message.value, str(e))
                     
-                    # Small sleep to prevent busy waiting
                     await asyncio.sleep(0.1)
                     
                 except Exception as e:
                     logger.error(f"❌ Error in consumer loop: {e}")
-                    await asyncio.sleep(5)  # Wait before retrying
+                    await asyncio.sleep(5)  
                     
         except Exception as e:
             logger.error(f"❌ Failed to start Kafka consumer: {e}")
@@ -138,7 +144,7 @@ class KafkaService:
             if not self.producer:
                 self.producer = self._create_producer()
             
-            # Convert to dict for JSON serialization with camelCase for Java
+
             message_dict = {
                 'executionId': str(completion_message.executionId),
                 'workflowId': str(completion_message.workflowId),
@@ -158,9 +164,10 @@ class KafkaService:
                 value=message_dict
             )
             
-            # Wait for the message to be sent
+        
             record_metadata = future.get(timeout=10)
             
+
             logger.info(
                 f"✅ Published completion for node: {completion_message.nodeId} "
                 f"with status: {completion_message.status} "
@@ -171,12 +178,16 @@ class KafkaService:
             logger.error(f"❌ Failed to publish completion message: {e}")
             raise
     
+
+
+
+
+    
     async def _send_failure_completion(self, original_message: dict, error: str):
         """Send failure completion message"""
         try:
             from datetime import datetime
             
-            # Handle both camelCase and snake_case
             execution_id = original_message.get('executionId') or original_message.get('execution_id')
             workflow_id = original_message.get('workflowId') or original_message.get('workflow_id')
             node_id = original_message.get('nodeId') or original_message.get('node_id')

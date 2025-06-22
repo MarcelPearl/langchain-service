@@ -22,19 +22,25 @@ class NodeExecutionMessage(BaseModel):
     nodeData: Dict[str, Any] = Field(alias="node_data")
     context: Dict[str, Any] = Field(default_factory=dict)
     dependencies: List[str] = Field(default_factory=list)
-    timestamp: str  # ISO-8601 string to match Java Instant
+    timestamp: str  # ISO-8601 
     priority: Priority = Priority.NORMAL
     
+
+
     class Config:
         allow_population_by_field_name = True
         use_enum_values = True
         
+
+
     @validator('executionId', 'workflowId', pre=True)
     def parse_uuid(cls, v):
         if isinstance(v, str):
             return UUID(v)
         return v
         
+
+
     @validator('timestamp', pre=True)
     def parse_timestamp(cls, v):
         if isinstance(v, dict):
@@ -48,20 +54,27 @@ class NodeCompletionMessage(BaseModel):
     workflowId: UUID
     nodeId: str
     nodeType: str
-    status: str  # COMPLETED, FAILED
+    status: str 
     output: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
-    timestamp: str  # ISO-8601 string
+    timestamp: str  # ISO-8601
     processingTime: int
     service: str = "fastapi"
 
-    model_config = ConfigDict(populate_by_name=True)  # ✅ for Pydantic v2
+    model_config = ConfigDict(populate_by_name=True)  # for Pydantic v2
+
+
+
+
 
     @validator('executionId', 'workflowId', pre=True)
     def parse_uuid(cls, v):
         if isinstance(v, str):
             return UUID(v)
         return v
+
+
+
 
     @validator('timestamp', pre=True, always=True)
     def ensure_string_timestamp(cls, v):

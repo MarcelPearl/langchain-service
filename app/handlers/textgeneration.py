@@ -19,7 +19,6 @@ class TextGenerationHandler(BaseNodeHandler):
         logger.info("🔧 Initializing OpenAI text generation handler...")
         
         try:
-            # Get API key
             api_key = getattr(settings, 'openai_api_key', None) or os.getenv('OPENAI_API_KEY')
             
             if not api_key:
@@ -27,9 +26,8 @@ class TextGenerationHandler(BaseNodeHandler):
             
             self.client = openai.OpenAI(api_key=api_key)
             
-            # Simple settings
-            self.default_model = "gpt-3.5-turbo"  # Cheapest option
-            self.max_tokens_limit = 300           # Hard limit per request
+            self.default_model = "gpt-3.5-turbo" 
+            self.max_tokens_limit = 300          
             
             logger.info(f"✅ OpenAI client ready - Max tokens per request: {self.max_tokens_limit}")
             
@@ -49,11 +47,13 @@ class TextGenerationHandler(BaseNodeHandler):
             node_data = message.nodeData
             context = message.context or {}
 
-            # Get prompt
+
+
             raw_prompt = node_data.get("prompt", "Hello, how are you?")
             prompt = self.substitute_template_variables(raw_prompt, context)
 
-            # Limit tokens (SAFETY CHECK)
+
+
             requested_tokens = node_data.get("max_tokens", 100)
             max_tokens = min(requested_tokens, self.max_tokens_limit)
             
@@ -125,7 +125,8 @@ class TextGenerationHandler(BaseNodeHandler):
             except Exception as e:
                 raise RuntimeError(f"OpenAI error: {e}")
 
-        # Run async
+
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _call_openai)
 
