@@ -1,10 +1,12 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
+
+from pydantic import validator
+from app.handlers.summarizationhandler import SummarizationHandler
 from app.models.workflow_message import NodeExecutionMessage, NodeCompletionMessage
 from app.service.redis import RedisService
-from app.service.kafka import KafkaService
 from app.handlers.textgeneration import TextGenerationHandler
 from app.handlers.kmeanshandler import KMeansHandler
 from app.handlers.pythontaskhandler import PythonTaskHandler
@@ -14,17 +16,25 @@ logger = logging.getLogger(__name__)
 class NodeExecutorService:
     """Node executor service matching Spring Boot StaticNodeExecutor pattern"""
     
-    def __init__(self, redis_service: RedisService, kafka_service: KafkaService):
+    def __init__(self, redis_service: RedisService, kafka_service):
         self.redis_service = redis_service
         self.kafka_service = kafka_service
         
-        # Initialize node handlers - exact match to Spring Boot pattern
+        # Initialize ALL node handlers - exact match to Spring Boot pattern
         self.handlers = {
             "text-generation": TextGenerationHandler(redis_service),
             "k-means": KMeansHandler(redis_service),
             "python-task": PythonTaskHandler(redis_service),
-            "question-answer": TextGenerationHandler(redis_service), 
+            "question-answer": TextGenerationHandler(redis_service),  
             "clusterization": KMeansHandler(redis_service),  
+            "ai_decision": TextGenerationHandler(redis_service),
+            "ai_classification": TextGenerationHandler(redis_service),
+            "summarization": SummarizationHandler(redis_service),
+            "llm_prompt": TextGenerationHandler(redis_service),
+            "ai_transform": PythonTaskHandler(redis_service),
+            "sentiment_analysis": TextGenerationHandler(redis_service),
+            "data_analysis": PythonTaskHandler(redis_service),
+            "ml_prediction": KMeansHandler(redis_service),
         }
         
         logger.info(f"🔧 Initialized node executor with handlers: {list(self.handlers.keys())}")
@@ -64,7 +74,11 @@ class NodeExecutorService:
     
     def _find_handler(self, node_type: str):
         """Find handler for node type - matching Spring Boot pattern"""
-        return self.handlers.get(node_type.lower())
+        handler = self.handlers.get(node_type.lower())
+        if not handler:
+            # Try with underscores replaced by hyphens
+            handler = self.handlers.get(node_type.lower().replace('_', '-'))
+        return handler
     
     async def _store_execution_context(self, message: NodeExecutionMessage):
         """Store execution context in Redis - matching Spring Boot pattern"""
@@ -96,8 +110,9 @@ class NodeExecutorService:
                     "node_type": message.nodeType
                 },
                 error=error,
-                timestamp=datetime.now().isoformat(),
-                processingTime=processing_time
+               timestamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+                processingTime=processing_time,
+                service="fastapi"  # Mark as FastAPI service
             )
             
             await self.kafka_service.publish_completion(failure_message)
@@ -105,3 +120,10 @@ class NodeExecutorService:
             
         except Exception as publish_error:
             logger.error(f"Failed to publish failure event for node: {message.nodeId}", exc_info=True)
+            
+@validator('timestamp', pre=True, always=True)
+def ensure_string_timestamp(cls, v):
+    if isinstance(v, datetime):
+        # ✅ Format with milliseconds only, to match Java Instant
+        return v.isoformat(timespec='milliseconds') + 'Z'
+    return str(v)

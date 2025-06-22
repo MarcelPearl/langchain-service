@@ -1,7 +1,7 @@
 import json
 import logging
 import asyncio
-from typing import Callable
+from typing import Callable, Dict, Any
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import KafkaError
 from app.core.config import settings
@@ -47,6 +47,35 @@ class KafkaService:
             buffer_memory=33554432 # Match Spring Boot
         )
     
+    def _normalize_message_fields(self, message_data: dict) -> dict:
+        """Convert Java camelCase to Python snake_case and handle field mappings"""
+        # Create a mapping of possible field variations
+        field_mappings = {
+            'executionId': 'execution_id',
+            'execution_id': 'execution_id',
+            'workflowId': 'workflow_id',
+            'workflow_id': 'workflow_id',
+            'nodeId': 'node_id',
+            'node_id': 'node_id',
+            'nodeType': 'node_type',
+            'node_type': 'node_type',
+            'nodeData': 'node_data',
+            'node_data': 'node_data',
+            'context': 'context',
+            'dependencies': 'dependencies',
+            'timestamp': 'timestamp',
+            'priority': 'priority',
+            'processingTime': 'processing_time',
+            'processing_time': 'processing_time'
+        }
+        
+        normalized = {}
+        for key, value in message_data.items():
+            normalized_key = field_mappings.get(key, key)
+            normalized[normalized_key] = value
+            
+        return normalized
+    
     async def start_consumer(self, node_executor_callback: Callable):
         """Start consuming messages from Kafka"""
         self.running = True
@@ -69,8 +98,11 @@ class KafkaService:
                             try:
                                 logger.info(f"📨 Raw message received from {topic_partition}: {message.value}")
                                 
+                                # Normalize field names
+                                normalized_data = self._normalize_message_fields(message.value)
+                                
                                 # Parse the message using the exact Spring Boot format
-                                execution_message = NodeExecutionMessage.model_validate(message.value)
+                                execution_message = NodeExecutionMessage.model_validate(normalized_data)
                                 
                                 logger.info(
                                     f"📨 Parsed node execution: {execution_message.nodeId} "
@@ -106,8 +138,19 @@ class KafkaService:
             if not self.producer:
                 self.producer = self._create_producer()
             
-            # Convert to dict for JSON serialization
-            message_dict = completion_message.model_dump(by_alias=True)
+            # Convert to dict for JSON serialization with camelCase for Java
+            message_dict = {
+                'executionId': str(completion_message.executionId),
+                'workflowId': str(completion_message.workflowId),
+                'nodeId': completion_message.nodeId,
+                'nodeType': completion_message.nodeType,
+                'status': completion_message.status,
+                'output': completion_message.output,
+                'error': completion_message.error,
+                'timestamp': completion_message.timestamp,
+                'processingTime': completion_message.processingTime,
+                'service': completion_message.service or 'fastapi'
+            }
             
             future = self.producer.send(
                 settings.kafka_node_completion_topic,
@@ -133,16 +176,23 @@ class KafkaService:
         try:
             from datetime import datetime
             
+            # Handle both camelCase and snake_case
+            execution_id = original_message.get('executionId') or original_message.get('execution_id')
+            workflow_id = original_message.get('workflowId') or original_message.get('workflow_id')
+            node_id = original_message.get('nodeId') or original_message.get('node_id')
+            node_type = original_message.get('nodeType') or original_message.get('node_type')
+            
             completion = NodeCompletionMessage(
-                executionId=original_message.get('executionId') or original_message.get('execution_id'),
-                workflowId=original_message.get('workflowId') or original_message.get('workflow_id'),
-                nodeId=original_message.get('nodeId') or original_message.get('node_id'),
-                nodeType=original_message.get('nodeType') or original_message.get('node_type'),
+                executionId=execution_id,
+                workflowId=workflow_id,
+                nodeId=node_id,
+                nodeType=node_type,
                 status="FAILED",
                 output={"error": error},
                 error=error,
                 timestamp=datetime.now().isoformat(),
-                processingTime=0
+                processingTime=0,
+                service="fastapi"
             )
             await self.publish_completion(completion)
         except Exception as e:
@@ -156,4 +206,3 @@ class KafkaService:
         if self.producer:
             self.producer.close()
         logger.info("✅ Kafka connections closed")
-        

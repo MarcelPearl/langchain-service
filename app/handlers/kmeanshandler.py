@@ -25,7 +25,6 @@ class KMeansHandler(BaseNodeHandler):
             
             logger.info(f"K-means node context variables: {list(context.keys())}")
             
-            # Get clustering parameters
             n_clusters = node_data.get('n_clusters', 3)
             data_source = node_data.get('data_source', 'context_data')
             features = node_data.get('features', [])
@@ -33,7 +32,6 @@ class KMeansHandler(BaseNodeHandler):
             
             logger.info(f"🔬 Running K-means clustering with {n_clusters} clusters")
             
-            # Get data from context or generate sample data
             if data_source == 'context_data' and 'dataset' in context:
                 data = context['dataset']
                 if isinstance(data, str):
@@ -41,7 +39,6 @@ class KMeansHandler(BaseNodeHandler):
                     data = json.loads(data)
                 df = pd.DataFrame(data)
             else:
-                # Generate sample data for demonstration
                 logger.info("📊 Generating sample data for clustering")
                 np.random.seed(42)
                 data = {
@@ -52,7 +49,6 @@ class KMeansHandler(BaseNodeHandler):
                 df = pd.DataFrame(data)
                 features = ['feature_1', 'feature_2', 'feature_3']
             
-            # Select features for clustering
             if features:
                 available_features = [f for f in features if f in df.columns]
                 if not available_features:

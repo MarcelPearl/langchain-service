@@ -1,7 +1,8 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
+from pydantic import Field
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import torch
 from app.handlers.basehandler import BaseNodeHandler
@@ -26,7 +27,6 @@ class TextGenerationHandler(BaseNodeHandler):
             self.tokenizer = GPT2Tokenizer.from_pretrained(settings.huggingface_model)
             self.model = GPT2LMHeadModel.from_pretrained(settings.huggingface_model)
             
-            # Add padding token if it doesn't exist
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
             
@@ -46,20 +46,16 @@ class TextGenerationHandler(BaseNodeHandler):
             
             logger.info(f"Text generation node context variables: {list(context.keys())}")
             
-            # Get the prompt from node data, substitute template variables
             raw_prompt = node_data.get('prompt', 'Hello, how are you?')
             prompt = self.substitute_template_variables(raw_prompt, context)
             
-            # Get generation parameters
             max_tokens = node_data.get('max_tokens', settings.max_tokens)
             temperature = node_data.get('temperature', settings.temperature)
             
             logger.info(f"🤖 Generating text for prompt: {prompt[:50]}...")
             
-            # Tokenize input
             inputs = self.tokenizer.encode(prompt, return_tensors='pt')
             
-            # Generate text
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
@@ -69,16 +65,13 @@ class TextGenerationHandler(BaseNodeHandler):
                     pad_token_id=self.tokenizer.eos_token_id
                 )
             
-            # Decode the generated text
             generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             generated_only = generated_text[len(prompt):].strip()
             
-            # Build output matching Spring Boot pattern
             output = {}
             if context:
-                output.update(context)  # Preserve entire context like Spring Boot
+                output.update(context)  
             
-            # Add results
             output.update({
                 "generated_text": generated_only,
                 "full_text": generated_text,
@@ -102,7 +95,6 @@ class TextGenerationHandler(BaseNodeHandler):
             processing_time = int((time.time() - start_time) * 1000)
             logger.error(f"❌ Text generation node failed: {message.nodeId}", exc_info=True)
             
-            # Build error output matching Spring Boot pattern
             error_output = {}
             if message.context:
                 error_output.update(message.context)
@@ -132,7 +124,7 @@ class TextGenerationHandler(BaseNodeHandler):
                 status=status,
                 output=output,
                 error=output.get("error") if status == "FAILED" else None,
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 processingTime=processing_time
             )
             

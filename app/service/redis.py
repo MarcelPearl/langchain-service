@@ -1,4 +1,4 @@
-import aioredis
+import redis.asyncio as redis
 import json
 import logging
 from typing import Any, Optional
@@ -7,15 +7,15 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 class RedisService:
-    """Redis service matching Spring Boot patterns"""
-    
+    """Redis service matching Spring Boot patterns (async, safe, redis.asyncio)"""
+
     def __init__(self):
-        self.redis = None
-        
+        self.redis: Optional[redis.Redis] = None
+
     async def connect(self):
         """Connect to Redis"""
         try:
-            self.redis = aioredis.from_url(
+            self.redis = redis.Redis.from_url(
                 settings.redis_url,
                 db=settings.redis_db,
                 max_connections=settings.redis_max_connections,
@@ -26,13 +26,13 @@ class RedisService:
         except Exception as e:
             logger.error(f"❌ Failed to connect to Redis: {e}")
             raise
-    
+
     async def ping(self):
         """Test Redis connection"""
         if self.redis:
             return await self.redis.ping()
-        raise Exception("Redis not connected")
-    
+        raise RuntimeError("Redis not connected")
+
     async def set(self, key: str, value: Any, ex: Optional[int] = None):
         """Set a value in Redis with optional expiration"""
         try:
@@ -41,7 +41,7 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis SET error for key {key}: {e}")
             raise
-    
+
     async def get(self, key: str) -> Optional[Any]:
         """Get a value from Redis"""
         try:
@@ -55,7 +55,7 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis GET error for key {key}: {e}")
             raise
-    
+
     async def delete(self, key: str):
         """Delete a key from Redis"""
         try:
@@ -63,7 +63,7 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis DELETE error for key {key}: {e}")
             raise
-    
+
     async def close(self):
         """Close Redis connection"""
         if self.redis:
