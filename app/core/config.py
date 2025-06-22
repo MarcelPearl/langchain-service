@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     redis_max_connections: int = 20
     huggingface_api_key: str = ""
     # AI/ML Configuration
-    huggingface_model: str = "gpt2"
+    huggingface_model: str = "tiiuae/falcon-7b-instruct"
     max_tokens: int = 100
     temperature: float = 0.7
     summarization_model: str = "sshleifer/distilbart-cnn-12-6"
-    
+    openai_api_key: str = ""
     # Service Configuration
     service_name: str = "fastapi-node-executor"
     log_level: str = "INFO"
