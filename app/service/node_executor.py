@@ -135,7 +135,7 @@ class NodeExecutorService:
                 error=error,
                 timestamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 processingTime=processing_time,
-                service="fastapi"  # Mark as FastAPI service
+                service="fastapi"  
             )
             
             await self.kafka_service.publish_completion(failure_message)

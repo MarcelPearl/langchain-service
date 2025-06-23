@@ -18,44 +18,44 @@ class ContentGenerationHandler(BaseNodeHandler):
         super().__init__(redis_service)
         logger.info("🔧 Initializing content generation handler...")
         
-        # Don't initialize OpenAI client here, do it lazily in execute()
+       
         self.client = None
         self.default_model = "gpt-3.5-turbo"
         self._api_key_cache = None
-        self._execution_id_cache = None  # Cache execution ID to detect changes
+        self._execution_id_cache = None 
         
         logger.info("✅ Content generation handler initialized")
 
     async def _get_openai_client(self, execution_id: str,message:NodeExecutionMessage):
         """Get or create OpenAI client with execution-specific API key from Redis"""
         try:
-            # Check if we need to refresh the client (different execution or no cache)
+            
             if (self.client is not None and 
                 self._api_key_cache and 
                 self._execution_id_cache == execution_id):
                 return self.client
            
             
-            # Try to get execution-specific API key first
+     
             execution_key = f"execution:{execution_id}:openai_api_key"
-            # api_key = await self.redis_service.get(execution_key)
+         
             api_key=message.context.get("openai")
             
             if api_key:
                 logger.info(f"📝 Using execution-specific OpenAI API key from Redis: {execution_key}")
             else:
-                # Fallback to global API key
+               
                 api_key = await self.redis_service.get("openai_api_key")
                 if api_key:
                     logger.info("📝 Using global OpenAI API key from Redis")
                 else:
-                    # Final fallback to environment variables/settings
+                
                     api_key = getattr(settings, 'openai_api_key', None) or os.getenv('OPENAI_API_KEY')
                     if api_key:
                         logger.info("📝 Using OpenAI API key from environment/settings")
             
             if not api_key:
-                # Provide detailed error message with debugging info
+              
                 error_msg = (
                     f"OpenAI API key not found for execution {execution_id}. "
                     f"Checked: execution-specific Redis ({execution_key}), "
@@ -64,7 +64,7 @@ class ContentGenerationHandler(BaseNodeHandler):
                 )
                 raise ValueError(error_msg)
             
-            # Create new client if API key changed, execution changed, or client doesn't exist
+          
             if (api_key != self._api_key_cache or 
                 execution_id != self._execution_id_cache or 
                 self.client is None):
@@ -84,13 +84,13 @@ class ContentGenerationHandler(BaseNodeHandler):
         start_time = time.time()
         logger.info(f"✍️ Executing content-generation node: {message.nodeId}")
 
-        # Initialize context early to avoid UnboundLocalError
+       
         node_data = message.nodeData or {}
         context = message.context or {}
         execution_id = str(message.executionId)
 
         try:
-            # Get OpenAI client with execution-specific API key from Redis
+           
             
             client = await self._get_openai_client(execution_id,message)
             if client == None:
@@ -109,7 +109,7 @@ class ContentGenerationHandler(BaseNodeHandler):
 
             generated_content = await self._generate_content(content_type, topic, style, length, model, client)
 
-            # Determine API key source for logging
+        
             api_key_source = await self._determine_api_key_source(execution_id)
 
             output = {
@@ -137,9 +137,9 @@ class ContentGenerationHandler(BaseNodeHandler):
             processing_time = int((time.time() - start_time) * 1000)
             logger.error(f"❌ Content generation failed: {e}")
 
-            # Use the already-initialized context and node_data
+           
             error_output = {
-                **context,  # This is now safe to use
+                **context,  
                 "error": str(e),
                 "topic": node_data.get("topic", ""),
                 "generated_content": None,
@@ -221,16 +221,15 @@ class ContentGenerationHandler(BaseNodeHandler):
         """Helper method to update API key in Redis"""
         try:
             if execution_id:
-                # Update execution-specific key
+                
                 execution_key = f"execution:{execution_id}:openai_api_key"
                 await self.redis_service.set(execution_key, new_api_key)
                 logger.info(f"✅ OpenAI API key updated in Redis for execution: {execution_id}")
             else:
-                # Update global key
+                
                 await self.redis_service.set("openai_api_key", new_api_key)
                 logger.info("✅ Global OpenAI API key updated in Redis")
-            
-            # Reset cached client so it gets recreated with new key
+         
             self.client = None
             self._api_key_cache = None
             self._execution_id_cache = None
@@ -245,7 +244,7 @@ class ContentGenerationHandler(BaseNodeHandler):
         try:
             execution_key = f"execution:{execution_id}:openai_api_key"
             
-            # Check all possible sources
+     
             execution_specific = await self.redis_service.get(execution_key)
             global_redis = await self.redis_service.get("openai_api_key")
             environment = os.getenv('OPENAI_API_KEY')
