@@ -8,179 +8,232 @@ import openai
 from app.handlers.basehandler import BaseNodeHandler
 from app.models.workflow_message import NodeExecutionMessage, NodeCompletionMessage
 from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 class AIDecisionHandler(BaseNodeHandler):
-    """AI-powered decision node that returns true/false based on intelligent reasoning"""
+    """AI-powered decision making handler with execution-specific Redis API key"""
     
     def __init__(self, redis_service):
         super().__init__(redis_service)
+        logger.info("🔧 Initializing AI decision handler...")
+        
+      
+        self.client = None
+        self.default_model = "gpt-3.5-turbo"
+        self.max_tokens_limit = 200
+        self._api_key_cache = None
+        self._execution_id_cache = None 
+        
+        logger.info(f"✅ AI decision handler initialized - Max tokens: {self.max_tokens_limit}")
+
+    async def _get_openai_client(self, execution_id: str,message:NodeExecutionMessage):
+        """Get or create OpenAI client with execution-specific API key from Redis"""
         try:
-            api_key=getattr(settings, 'openai_api_key', None) or os.getenv('OPENAI_API_KEY')
-            if not api_key:
-                raise ValueError("OpenAI API key not found")
             
-            self.client = openai.OpenAI(api_key=api_key)
-            self.default_model = "gpt-3.5-turbo"
-            logger.info("🧠 AI decision handler ready")
+            if (self.client is not None and 
+                self._api_key_cache and 
+                self._execution_id_cache == execution_id):
+                return self.client
+            
+          
+            execution_key = f"execution:{execution_id}:openai_api_key"
+            api_key=message.context.get("openai")
+            
+            if api_key:
+                logger.info(f"📝 Using execution-specific OpenAI API key from Redis: {execution_key}")
+            else:
+               
+                api_key = await self.redis_service.get("openai_api_key")
+                if api_key:
+                    logger.info("📝 Using global OpenAI API key from Redis")
+                else:
+                    
+                    api_key = getattr(settings, 'openai_api_key', None) or os.getenv('OPENAI_API_KEY')
+                    if api_key:
+                        logger.info("📝 Using OpenAI API key from environment/settings")
+            
+            if not api_key:
+                raise ValueError("OpenAI API key not found in execution-specific Redis, global Redis, environment variables, or settings")
+            
+        
+            if (api_key != self._api_key_cache or 
+                execution_id != self._execution_id_cache or 
+                self.client is None):
+                
+                self.client = openai.OpenAI(api_key=api_key)
+                self._api_key_cache = api_key
+                self._execution_id_cache = execution_id
+                logger.info(f"✅ OpenAI client initialized for execution: {execution_id}")
+            
+            return self.client
             
         except Exception as e:
-            logger.error(f"❌ Failed to initialize AI decision handler: {e}")
-            self.client = None
+            logger.error(f"❌ Failed to get OpenAI client for execution {execution_id}: {e}")
+            raise
 
     async def execute(self, message: NodeExecutionMessage) -> Dict[str, Any]:
+        """Make AI-powered decisions using OpenAI with execution-specific Redis API key"""
         start_time = time.time()
-        logger.info(f"🤔 Executing ai-decision node: {message.nodeId}")
+        logger.info(f"🚀 Executing ai-decision node: {message.nodeId}")
 
         try:
-            if not self.client:
-                raise RuntimeError("OpenAI client not available")
+           
+            execution_id = str(message.executionId)
+            client = await self._get_openai_client(execution_id,message)
 
             node_data = message.nodeData
             context = message.context or {}
 
-            question = self.substitute_template_variables(node_data.get("question", ""), context)
-            criteria = node_data.get("criteria", "")
-            context_data = node_data.get("context_data", "")
-            model = node_data.get("model", self.default_model)
+           
+            raw_decision_criteria = node_data.get("decision_criteria", "Make a decision based on the provided context")
+            decision_criteria = self.substitute_template_variables(raw_decision_criteria, context)
+            
+            options = node_data.get("options", ["yes", "no"])
             confidence_threshold = node_data.get("confidence_threshold", 0.7)
 
-            if not question.strip():
-                raise ValueError("No decision question provided")
+            logger.info(f"🤔 Making decision with {len(options)} options")
 
-            logger.info(f"🧠 AI deciding: {question[:50]}...")
+          
+            decision_result = await self._make_decision(decision_criteria, options, confidence_threshold, client)
 
-            decision_result = await self._make_ai_decision(
-                question, criteria, context_data, context, model
-            )
+          
+            api_key_source = await self._determine_api_key_source(execution_id)
 
-            decision = decision_result["decision"]
-            confidence = decision_result["confidence"]
-            reasoning = decision_result["reasoning"]
-
-            final_decision = decision and confidence >= confidence_threshold
-
+          
             output = {
                 **context,
-                "question": question,
-                "decision": final_decision,
-                "raw_decision": decision,
-                "confidence": confidence,
-                "confidence_threshold": confidence_threshold,
-                "reasoning": reasoning,
-                "criteria": criteria,
-                "passed_threshold": confidence >= confidence_threshold,
-                "model_used": model,
+                "decision": decision_result["decision"],
+                "confidence": decision_result["confidence"],
+                "reasoning": decision_result["reasoning"],
+                "options_considered": options,
+                "decision_criteria": decision_criteria,
                 "node_type": "ai-decision",
-                "node_executed_at": datetime.now().isoformat()
+                "node_executed_at": datetime.now().isoformat(),
+                "api_key_source": api_key_source,
+                "execution_id": execution_id,
+                "threshold_met": decision_result["confidence"] >= confidence_threshold
             }
 
             processing_time = int((time.time() - start_time) * 1000)
             await self._publish_completion_event(message, output, "COMPLETED", processing_time)
 
-            logger.info(f"✅ AI decision: {final_decision} (confidence: {confidence:.2f})")
+            logger.info(f"✅ Decision made: {decision_result['decision']} (confidence: {decision_result['confidence']:.2f}) in {processing_time}ms")
             return output
 
         except Exception as e:
             processing_time = int((time.time() - start_time) * 1000)
-            logger.error(f"❌ AI decision failed: {e}")
+            logger.error(f"❌ Decision failed: {e}")
 
             error_output = {
                 **context,
                 "error": str(e),
-                "question": node_data.get("question", ""),
-                "decision": False,
+                "decision": None,
                 "confidence": 0.0,
-                "node_type": "ai-decision"
+                "reasoning": None,
+                "node_type": "ai-decision",
+                "execution_id": str(message.executionId)
             }
 
             await self._publish_completion_event(message, error_output, "FAILED", processing_time)
             raise
 
-    async def _make_ai_decision(self, question: str, criteria: str, context_data: str, 
-                               workflow_context: Dict, model: str) -> Dict[str, Any]:
-        """AI makes a true/false decision with reasoning"""
+    async def _determine_api_key_source(self, execution_id: str) -> str:
+        """Determine which source the API key came from for logging"""
+        execution_key = f"execution:{execution_id}:openai_api_key"
+        
+        if await self.redis_service.get(execution_key):
+            return f"execution_specific_redis:{execution_key}"
+        elif await self.redis_service.get("openai_api_key"):
+            return "global_redis"
+        else:
+            return "environment"
+
+    async def _make_decision(self, criteria: str, options: list, threshold: float, client) -> Dict[str, Any]:
+        """Make AI decision with provided client"""
         
         def _call_openai():
             try:
-                context_info = ""
-                if workflow_context:
-                    context_keys = list(workflow_context.keys())[:10]
-                    context_values = {k: str(v)[:100] for k, v in workflow_context.items() if k in context_keys}
-                    context_info = f"\nWorkflow Context: {context_values}"
+                prompt = f"""
+                Decision Criteria: {criteria}
                 
-                if context_data:
-                    context_info += f"\nAdditional Context: {context_data}"
+                Available Options: {', '.join(options)}
                 
-                if criteria:
-                    context_info += f"\nDecision Criteria: {criteria}"
+                Please make a decision and provide:
+                1. Your chosen option (must be exactly one from the list)
+                2. Confidence level (0.0 to 1.0)
+                3. Brief reasoning
+                
+                Respond in this format:
+                DECISION: [chosen option]
+                CONFIDENCE: [0.0-1.0]
+                REASONING: [your reasoning]
+                """
 
-                prompt = f"""You are an AI decision maker. Analyze the question and context, then make a TRUE or FALSE decision.
-
-Question: {question}
-{context_info}
-
-Think through this step by step:
-1. Analyze the available information
-2. Consider all relevant factors
-3. Make a logical decision
-4. Assess your confidence
-
-Respond in this exact format:
-DECISION: [TRUE or FALSE]
-CONFIDENCE: [0.0 to 1.0]
-REASONING: [Brief explanation of your decision]
-
-Example:
-DECISION: TRUE
-CONFIDENCE: 0.85
-REASONING: Based on the sales data showing 15% growth and positive customer feedback, the product launch appears successful."""
-
-                response = self.client.chat.completions.create(
-                    model=model,
+                response = client.chat.completions.create(
+                    model=self.default_model,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=300,
-                    temperature=0.1,  
+                    max_tokens=self.max_tokens_limit,
+                    temperature=0.3,
                     timeout=30
                 )
                 
-                result = response.choices[0].message.content.strip()
+                return self._parse_decision_response(response.choices[0].message.content, options)
                 
-            
-                decision = False
-                confidence = 0.5
-                reasoning = "Unable to parse AI response"
-                
-                lines = result.split('\n')
-                for line in lines:
-                    if line.startswith('DECISION:'):
-                        decision_text = line.replace('DECISION:', '').strip().upper()
-                        decision = decision_text == 'TRUE'
-                    elif line.startswith('CONFIDENCE:'):
-                        try:
-                            confidence = float(line.replace('CONFIDENCE:', '').strip())
-                            confidence = max(0.0, min(1.0, confidence)) 
-                        except ValueError:
-                            confidence = 0.5
-                    elif line.startswith('REASONING:'):
-                        reasoning = line.replace('REASONING:', '').strip()
-                
-                return {
-                    "decision": decision,
-                    "confidence": confidence,
-                    "reasoning": reasoning
-                }
-                
+            except openai.RateLimitError:
+                raise RuntimeError("Rate limit exceeded. Try again later.")
+            except openai.AuthenticationError:
+                raise RuntimeError("Invalid API key from Redis.")
             except Exception as e:
                 raise RuntimeError(f"OpenAI error: {e}")
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _call_openai)
 
+    def _parse_decision_response(self, response: str, options: list) -> Dict[str, Any]:
+        """Parse the AI decision response"""
+        try:
+            lines = response.strip().split('\n')
+            decision = None
+            confidence = 0.5
+            reasoning = "No reasoning provided"
+            
+            for line in lines:
+                if line.startswith('DECISION:'):
+                    decision = line.replace('DECISION:', '').strip()
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.replace('CONFIDENCE:', '').strip())
+                    except ValueError:
+                        confidence = 0.5
+                elif line.startswith('REASONING:'):
+                    reasoning = line.replace('REASONING:', '').strip()
+            
+         
+            if decision not in options:
+                decision = options[0]  
+                confidence = 0.3
+                reasoning = f"Invalid decision format, defaulted to {decision}"
+            
+            return {
+                "decision": decision,
+                "confidence": min(max(confidence, 0.0), 1.0),  
+                "reasoning": reasoning
+            }
+            
+        except Exception:
+            return {
+                "decision": options[0],
+                "confidence": 0.3,
+                "reasoning": "Failed to parse AI response"
+            }
+
     async def _publish_completion_event(self, message: NodeExecutionMessage,
-                                      output: Dict[str, Any], status: str, processing_time: int):
+                                        output: Dict[str, Any], status: str, processing_time: int):
+        """Publish completion event"""
         try:
             from app.main import app
+            
             completion_message = NodeCompletionMessage(
                 executionId=message.executionId,
                 workflowId=message.workflowId,
@@ -189,13 +242,35 @@ REASONING: Based on the sales data showing 15% growth and positive customer feed
                 status=status,
                 output=output,
                 error=output.get("error") if status == "FAILED" else None,
-                 timestamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+                timestamp=datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 processingTime=processing_time
             )
             
             if hasattr(app.state, 'kafka_service'):
                 await app.state.kafka_service.publish_completion(completion_message)
+                
         except Exception as e:
-            logger.error(f"Failed to publish completion event: {e}")
+            logger.error(f"❌ Failed to publish event: {e}")
 
-
+    async def update_api_key_in_redis(self, new_api_key: str, execution_id: str = None):
+        """Helper method to update API key in Redis"""
+        try:
+            if execution_id:
+              
+                execution_key = f"execution:{execution_id}:openai_api_key"
+                await self.redis_service.set(execution_key, new_api_key)
+                logger.info(f"✅ OpenAI API key updated in Redis for execution: {execution_id}")
+            else:
+  
+                await self.redis_service.set("openai_api_key", new_api_key)
+                logger.info("✅ Global OpenAI API key updated in Redis")
+            
+         
+            self.client = None
+            self._api_key_cache = None
+            self._execution_id_cache = None
+            
+            return {"status": "success", "message": "API key updated in Redis"}
+        except Exception as e:
+            logger.error(f"❌ Failed to update API key in Redis: {e}")
+            raise
